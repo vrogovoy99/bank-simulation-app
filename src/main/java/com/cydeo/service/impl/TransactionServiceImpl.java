@@ -3,9 +3,11 @@ package com.cydeo.service.impl;
 import com.cydeo.enums.AccountType;
 import com.cydeo.exception.AccountOwnershipException;
 import com.cydeo.exception.BadRequestException;
+import com.cydeo.exception.BalanceNotSufficientException;
 import com.cydeo.model.Account;
 import com.cydeo.model.Transaction;
 import com.cydeo.repository.AccountRepository;
+import com.cydeo.repository.TransactionRepository;
 import com.cydeo.service.TransactionService;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +20,8 @@ import java.util.UUID;
 public class TransactionServiceImpl implements TransactionService {
 
     private final AccountRepository accountRepository;
+    private final TransactionRepository transactionRepository;
+
     public TransactionServiceImpl(AccountRepository accountRepository){
         this.accountRepository=accountRepository;
     }
@@ -31,9 +35,26 @@ public class TransactionServiceImpl implements TransactionService {
         // are both accounts checking OR they belong to the same user
         validateAccount(sender, receiver);
         checkAccountOwnership(sender,receiver);
+        executeBalanceAndUpdateIfRequired(amount, sender, receiver);
+        //upon successful transfer create transfer object
+        Transaction transaction = Transaction.builder().amount(amount).sender(sender.getId())
+                .receiver(receiver.getId()).message(message).createDate(createDate).build();
+        // save transaction in database and return it
+        return transactionRepository.save(transaction);
+    }
 
-        //make transfer
-        return null;
+    private void executeBalanceAndUpdateIfRequired(BigDecimal amount, Account sender, Account receiver) {
+        if(checkSenderBalance(sender, amount)){
+            // update sender and receiver
+            sender.setBalance(sender.getBalance().subtract(amount));
+            receiver.setBalance(receiver.getBalance().add(amount));
+        }else{
+            throw new BalanceNotSufficientException("Sender balance is not sufficient for this transfer");
+        }
+    }
+
+    private boolean checkSenderBalance(Account sender, BigDecimal amount) {
+        return ((sender.getBalance().compareTo(amount)) > -1);
     }
 
     private void checkAccountOwnership(Account sender, Account receiver) {
